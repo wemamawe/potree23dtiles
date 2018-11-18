@@ -1,0 +1,2 @@
+测试potreeConvert生成的点云转换成cesium 3dtiles
+结论：cesium显示potree的点云效果不是特别好
