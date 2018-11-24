@@ -2,18 +2,18 @@
 import numpy as np
 from collections import OrderedDict
 
-from .lasio import las_
-from .proj import inv_wgs84, trans_wgs84
+from lasio import las_
+from proj import inv_wgs84, trans_wgs84,wgs84_from,wgs84_trans_matrix
 import glob2
-from .pnts import *
+from pnts import *
 
 _STEP = 20
 
-def read_las(fname, koi=('rgb','class'),tm='49n'):
+def read_las(fname, attr_list=('rgb','class'),tm='49n'):
     '''
-    读取点云文件
-    :param fname: 文件名
-    :param koi: 读取的字段
+    read las file
+    :param fname: file name
+    :param attr_list:
     :param scale: 比例尺
     :return: 返回数据的dist
     '''
@@ -27,15 +27,15 @@ def read_las(fname, koi=('rgb','class'),tm='49n'):
     # 判断数据里边是否存在指定的属性
     records = [key[2:] for key in las._RecordTypes[las.get_record_id()].keys()]
 
-    # 初始化字典
+    # init attribute of pointcloud
     attribute = {}
-    _tmpkoi = []
-    for k in koi:
+    _tm_attr_list = []
+    for k in attr_list:
         if k not in records:
             continue
         attribute[k] = []
-        _tmpkoi.append(k)
-    koi = _tmpkoi
+        _tm_attr_list.append(k)
+    attr_list = _tm_attr_list
     _scale = las.scale
 
     for i in range(0, ncout, Step):
@@ -45,7 +45,7 @@ def read_las(fname, koi=('rgb','class'),tm='49n'):
             continue
         if xyz is not None:
             xyz.append((arr['xyz']).astype('i4'))
-        for k in koi:
+        for k in attr_list:
             attribute[k].append(arr[k])
         boundary.append(xyz[len(xyz)-1].min(0)*_scale)
         boundary.append(xyz[len(xyz)-1].max(0)*_scale)
@@ -60,13 +60,12 @@ def read_las(fname, koi=('rgb','class'),tm='49n'):
     xyz = np.vstack(xyz)
 
     # 存储数据到数组
-    for k in koi:
+    for k in attr_list:
         if len(attribute[k][0].shape)>1:
             attribute[k] = np.vstack(attribute[k])
         else:
             attribute[k] = np.hstack(attribute[k])
 
-    attribute['treeID'] = np.ones(attribute['class'].shape).astype('u2')
     attribute['rgb']=attribute['rgb'].astype('u1')
     # 构造结果字典
     pcd= {
@@ -84,7 +83,7 @@ def read_las(fname, koi=('rgb','class'),tm='49n'):
     return pcd
 
 
-def covert_neu(info,tm='49n',popM=None):
+def covert_neu(info,tm,transM=None):
     '''
     转换成neu坐标的数据,将修改info的值
     :param info:读取后的字典值
@@ -99,11 +98,11 @@ def covert_neu(info,tm='49n',popM=None):
     _offset = _meta.get('offset')
     _scale = _meta.get('scale')
     if _xyz is not None and _meta is not None:
-        if popM is  None:
+        if transM is  None:
             mu = _xyz.mean(0) + _offset
             mu = wgs84_from(*(mu), tm=tm)
             popM = trans_wgs84(*mu)  # neu   ->  wgs84
-        m = inv_wgs84(popM)  # wgs84 ->  neu
+        m = inv_wgs84(transM)  # wgs84 ->  neu
         _xyz = _xyz*_scale+_offset
         _xyz = wgs84_from(*(_xyz.T), tm=tm)
         _xyz = _xyz.dot(m[:3,:3]) + m[3,:3]
@@ -117,10 +116,10 @@ def covert_neu(info,tm='49n',popM=None):
         bbox = np.r_[center.flatten(), (np.identity(3) * half.max()).flatten()]
         tbbox = np.r_[center.flatten(), (np.identity(3) * half).flatten()]
 
-        #转换成i4,防止精度丢失
+        #convert to i4,in case the loss of precision
         _xyz = (_xyz/_scale).astype('i4')
 
-        # 修改xyz的值
+        # convert xyz to wgs84 neu
         info['xyz'] = _xyz
         info['neu'] = {
             'bbox':list(bbox.flatten()),
@@ -140,19 +139,13 @@ def pcd2pnts(pcd,outfile):
             'RGB': attr['rgb']
         },
         'batch': {
-            'class': attr['class'],
-            'treeID': attr['treeID']
+            'class': attr['class']
         },
     }
     feature_data = data.get('feature')
     batch_data = data.get('batch')
     pnts = Pnts()
     pnts.write(outfile, data)
-
-def convertPotree():
-    pass
-
-
 
 
 class treeNode:
@@ -191,47 +184,42 @@ class treeNode:
         if self.level%5==0:
             self.hierarchy = True
 
-
-def visitNode(childs,tileset_json,tm='',popM='',outdir=r'D:\Program Files (x86)\HiServer\apache2.2\htdocs\pcdtest1\potree'):
+#after potree,the node exist just one point,this situtation can't make the box,
+# so if the number of points less than limit_node_size,i just abandon it
+limit_node_size=4
+def visitNode(childs,tileset_json,tm='',transM=None,outdir=''):
     if not childs:return
 
     for e in childs:
         _child_node = {
-        'boundingVolume': {'box':[]},  # 存储八叉树的box
+        'boundingVolume': {'box':[]},  # save node box
         'children': [],
-        'content': {'url': ''},  # 存储tightbox , 'boundingVolume': ''
+        'content': {'url': ''},  #save tightbox , 'boundingVolume': ''
         'geometricError': 0,
         }
         _pcd = read_las(e.file, tm=tm)
-        _pcd = covert_neu(_pcd, tm=tm, popM=popM)
+        if _pcd['xyz'].shape[0] < limit_node_size: continue
+        _pcd = covert_neu(_pcd, tm=tm, transM=transM)
         pcd2pnts(_pcd, r'%s/%s.pnts' % (outdir, e.key))
         _child_node['boundingVolume']['box'] = _pcd.get('neu').get('bbox')
         _child_node['geometricError'] = _pcd.get('neu').get('bbox')[3] / geomeotric_space
         _child_node['content']['url'] = '%s.pnts' % (e.key)
         tileset_json.append(_child_node)
-        print('visit',e.key)
+        print('write node:',e.key)
         if not e.childs:   continue
-        visitNode(e.childs,_child_node['children'],tm=tm, popM=popM,outdir=outdir)
+        visitNode(e.childs,_child_node['children'],tm=tm, transM=transM,outdir=outdir)
 
 
-
-
-
-class Tree:
-    root = treeNode()
-
-    def insert(self,node):
-        self.root.addChild(node)
-
-
-hierarchyStepSize=5
-
-if __name__ == "__main__":
-    import os
-    import copy
-    tm = 'EPSG:32650'
+import os
+import copy
+def testConvert():
+    src = r'D:\Program Files (x86)\HiServer\apache2.2\htdocs\potree\pointclouds\test\data\r'
+    # out dir
+    outdir = r'D:\Program Files (x86)\HiServer\apache2.2\htdocs\pcdtest1\potree'
+    proj_param = 'EPSG:32650'
+    # box from cloud.js in potree result
     bbox = {
-        'bbox':{
+        'bbox': {
             "lx": 536982.3269807688,
             "ly": 2805172.6864022344,
             "lz": 228.40542941074819,
@@ -239,7 +227,7 @@ if __name__ == "__main__":
             "uy": 2840735.7910508245,
             "uz": 35791.510078000836
         },
-        'tbbox':{
+        'tbbox': {
             "lx": 536982.3269807688,
             "ly": 2805172.6864022344,
             "lz": 228.40542941074819,
@@ -248,33 +236,40 @@ if __name__ == "__main__":
             "uz": 1002.2817169420287
         }
     }
+
+    # get all node
+    # las_list = glob2.glob("%s/*.las"%src) #just first hierarchy
+    las_list = glob2.glob("%s/**/*.las" % src)  # convert all
+
+    if not las_list:
+        print('can not find las')
+        return
+
     tightBox = bbox.get('tbbox')
-    mu = np.array([(tightBox['lx']+tightBox['ux'])/2,(tightBox['ly']+tightBox['uy'])/2,(tightBox['lz']+tightBox['uz'])/2])
+    mu = np.array([(tightBox['lx'] + tightBox['ux']) / 2, (tightBox['ly'] + tightBox['uy']) / 2,
+                   (tightBox['lz'] + tightBox['uz']) / 2])
 
-    #记录转换矩阵
-    mu = wgs84_from(*(mu), tm=tm)
-    popM = popM_from(*mu)  # neu   ->  wgs84
-    #m = inv_popM(popM)  # wgs84 ->  neu
-    las_list = glob2.glob("%s/**/*.las"%(r'D:\Program Files (x86)\HiServer\apache2.2\htdocs\potree\pointclouds\test\data\r'))
-    outdir = r'D:\Program Files (x86)\HiServer\apache2.2\htdocs\pcdtest1\potree1'
-
+    # recode matrix
+    mu = wgs84_from(*(mu), tm=proj_param)
+    transM = wgs84_trans_matrix(*mu)
 
     def getkey(name):
         name = os.path.basename(name)
         return len(name)
-    # 按数字进行排序
+
+    # sort as file name length
     las_list.sort(key=getkey)
 
     root = {
-        'boundingVolume': {'box': []},  # 存储八叉树的box
+        'boundingVolume': {'box': []},
         'children': [],
-        'content': {'url': ''},  # 存储tightbox , 'boundingVolume': ''
+        'content': {'url': ''},
         'geometricError': 0,
         'refine': 'ADD',
-        'transform': list(popM.flatten()),  # r4x4, neu 2 wgs84
+        'transform': list(transM.flatten()),  # r4x4, neu 2 wgs84
     }
 
-    geomeotric_space =16
+    geomeotric_space = 16
     rootnode = treeNode()
 
     rootnode.setFile(las_list[0])
@@ -283,19 +278,27 @@ if __name__ == "__main__":
         _node.setFile(e)
         rootnode.addNode(_node)
 
-    pcd = read_las(rootnode.file, tm=tm)
-    pcd = covert_neu(pcd, tm=tm, popM=popM)
+    pcd = read_las(rootnode.file, tm=proj_param)
+    pcd = covert_neu(pcd, tm=proj_param, transM=transM)
 
     pcd2pnts(pcd, r'%s/%s.pnts' % (outdir, rootnode.key))
     root['boundingVolume']['box'] = pcd.get('neu').get('bbox')
     root['geometricError'] = pcd.get('neu').get('bbox')[3] / geomeotric_space
     root['content']['url'] = '%s.pnts' % (rootnode.key)
 
-    visitNode(rootnode.childs,root['children'],tm,popM,outdir)
+    visitNode(rootnode.childs, root['children'], proj_param, transM, outdir)
     tileset = {
         'asset': {'version': '0.0'},
         'geometricError': root['geometricError'],
         'root': root,
     }
-    json.dump(tileset, open(r'%s/tileset.json'%outdir, 'w'))
+    json.dump(tileset, open(r'%s/tileset.json' % outdir, 'w'))
+
+
+
+#hierarchyStepSize=5
+
+if __name__ == "__main__":
+    testConvert()
+
 

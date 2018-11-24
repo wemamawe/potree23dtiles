@@ -82,13 +82,15 @@ def prcs_to(arr, popM, tm='wgs84'):
     if tm.lower() == 'wgs84': return arr
     return wgs84_to(arr[:, 0], arr[:, 1], arr[:, 2], tm=tm)
 
-
-if __name__ == '__main__':
-    lat, lng = [55.73837752, -120.87148552]
-    lat, lng = [30.87368477, 116.81449815]
-    utm = pj.Proj(proj='utm', zone=50, ellps='WGS84')
-    x, y = utm(116.81449815, 30.87368477)
-    # wgs84_to(*xyz, tm='longlat')
-    _origin = wgs84_from(lng, lat, 0, proj='longlat', tm='50n')
-    _origin = wgs84_from(lng, lat, 0, tm='longlat')
-    print(wgs84_to(*_origin, tm='longlat'))
+def wgs84_trans_matrix(x, y, z):  # pop matrix:  prcs_xyz*M => wgs84_xyz
+    # xyz should be wgs84
+    arr = wgs84_to(x, y, z)[:2]
+    arr = numpy.radians(arr)  # long,lat
+    sa, sb = numpy.sin(arr)
+    ca, cb = numpy.cos(arr)
+    return numpy.array([
+        [-sa, -ca * sb, ca * cb, x],
+        [ca, -sa * sb, sa * cb, y],
+        [0, cb, sb, z],
+        [0, 0, 0, 1]
+    ]).T
