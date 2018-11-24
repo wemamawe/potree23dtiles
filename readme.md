@@ -6,7 +6,7 @@
 
 
 
-# useage:
+# usage:
 ## potreeConvert
 ```
 # generate compressed LAZ files instead of the default BIN format.
@@ -24,5 +24,5 @@ you should change these values as yours:
     tileset.readyPromise.then(function(data) {
         viewer.scene.primitives.add(data);
     }
-    
+
 ```
