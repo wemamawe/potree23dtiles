@@ -3,7 +3,6 @@
 import logging
 import os, time
 import numpy
-import time
 
 
 class _BaseErr(Exception):
@@ -660,7 +659,4 @@ class LasFile1V2(_LasFile):
         h['file_year'] = 2017
         h['systemid'] = 'EXTRACTION'
         return h 
-    
 
-if __name__=='__main__':
-    pass

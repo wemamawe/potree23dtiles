@@ -25,8 +25,7 @@ class PointCloudV1(object):
     }
 
     BatchTable = {
-        'class': {"byteOffset":0,"type": "SCALAR","componentType": "UNSIGNED_BYTE"},
-        'treeID': {"byteOffset":0,"type": "SCALAR","componentType": "UNSIGNED_SHORT"}
+        'class': {"byteOffset":0,"type": "SCALAR","componentType": "UNSIGNED_BYTE"}
     }
 
 from collections import OrderedDict
@@ -51,9 +50,8 @@ class Pnts:
     def write(self,filename,data):
         '''
         :param filename:
-        :param header: 添加头
-        :param data: 形如{feature:None,batch:None}包含body和batch
-        :return: 返回字典 {status:1,msg:''} 如果status为1,即为成功，否则为false
+        :param data: {feature:None,batch:None}
+        :return:  {status:1,msg:''} status=1,successed!
         '''
         rs = dict(status=0,msg='')
         feature_data = data.get('feature')
@@ -83,10 +81,10 @@ class Pnts:
 
         hdr = np.zeros((1,), dtype=cfg2dtype(PointCloudV1.Header))
 
-        #构造数据
+        #generate data
         _data = [hdr, body_header_bytes, pos, rgb]
         _batch_data = []
-        byteOffset = 0 #记录偏移量
+        byteOffset = 0
         batch_header = PointCloudV1.BatchTable
         for k,v in batch_header.items():
             if batch_data.get(k) is not None:
